@@ -155,6 +155,9 @@ func NewRegistry(ctx context.Context, config *configuration.Configuration) (*Reg
 	}
 
 	configureBugsnag(config)
+	reposDir, _ := config.Storage["filesystem"]["rootdirectory"].(string)
+	reposDir = reposDir + "/repos/"
+	os.MkdirAll(reposDir, os.ModePerm)
 
 	// inject a logger into the uuid library. warns us if there is a problem
 	// with uuid generation under low entropy.
@@ -166,6 +169,7 @@ func NewRegistry(ctx context.Context, config *configuration.Configuration) (*Reg
 	app.RegisterHealthChecks()
 	handler := configureReporting(app)
 	handler = alive("/", handler)
+	handler = repos("/repos/", reposDir, handler)
 	handler = health.Handler(handler)
 	handler = panicHandler(handler)
 	if !config.Log.AccessLog.Disabled {
@@ -339,6 +343,19 @@ func configureReporting(app *handlers.App) http.Handler {
 	}
 
 	return handler
+}
+
+// repos simply wraps the handler with a repos filesystem
+func repos(path string, reposDir string, other http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.RequestURI, "/repos/") {
+			head := http.FileServer(http.Dir(reposDir))
+			headServer := http.StripPrefix("/repos/", head)
+			headServer.ServeHTTP(w, r)
+		} else {
+			other.ServeHTTP(w, r)
+		}
+	})
 }
 
 // configureLogging prepares the context with a logger using the
